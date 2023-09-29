@@ -16,22 +16,7 @@ jobs:
         name: Checkout
         uses: actions/checkout@v3
       - 
-        name: build & start 
+        name: run tests 
         run: |
           cd tests
-          docker compose up -d influx
-      - 
-        name: run tests
-        run: |
-          cd tests
-          chmod a+x tests.sh
-          docker compose up --build test-ingester-1 
-          docker compose cp tests.sh influx:/usr/local/bin/
-          docker compose exec influx "tests.sh"
-          docker compose up --build test-ingester-2
-      - 
-        name: cleanup
-        run: |
-          cd tests
-          docker compose down
-  
+          bash run.sh

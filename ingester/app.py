@@ -5,11 +5,13 @@ into influx db datapoints
 import os
 import re
 import time
-import xml.etree.ElementTree as etree
+from lxml import etree
 from datetime import datetime as dt
 from shutil import unpack_archive
 from typing import Any, Union
+import subprocess
 
+from formatters import parse_date_as_timestamp, parse_float_with_try, AppleStandHourFormatter 
 import gpxpy
 from gpxpy.gpx import GPXTrackPoint
 from influxdb import InfluxDBClient
@@ -18,21 +20,6 @@ ZIP_PATH = "/export.zip"
 ROUTES_PATH = "/export/apple_health_export/workout-routes/"
 EXPORT_PATH = "/export/apple_health_export"
 EXPORT_XML_REGEX = re.compile("export.xml",re.IGNORECASE)
-
-def parse_float_with_try(v: Any) -> Union[float, int]:
-    """convert v to float or 0"""
-    try:
-        return float(v)
-    except ValueError:
-        try:
-            return int(v)
-        except Exception:
-            return 0
-
-
-def parse_date_as_timestamp(v: Any) -> int:
-    return int(dt.fromisoformat(v).timestamp())
-
 
 def format_route_point(
     name: str, point: GPXTrackPoint, next_point=None
@@ -66,6 +53,10 @@ def format_record(record: dict[str, Any]) -> dict[str, Any]:
         .removeprefix("HKCategoryTypeIdentifier")
         .removeprefix("HKDataType")
     )
+
+    if measurement == "AppleStandHour":
+        return AppleStandHourFormatter(record)
+
     date = parse_date_as_timestamp(record.get("startDate", 0))
     value = parse_float_with_try(record.get("value", 1))
     unit = record.get("unit", "unit")
@@ -132,12 +123,18 @@ def process_health_data(client: InfluxDBClient) -> None:
     if not export_xml_files:
         print("No export file found, skipping...")
         return
-    
     export_file = os.path.join(EXPORT_PATH,export_xml_files[0])
     print("Export file is",export_file)
+
+    print("Removing potentially malformed XML..")
+    p = subprocess.run("sed -i '/<HealthData/,$!d' "+export_file,shell=True,capture_output=True)
+    if p.returncode != 0:
+        print(p.stdout,p.stderr)
+
     records = []
     total_count = 0
-    for _, elem in etree.iterparse(export_file):
+    context = etree.iterparse(export_file,recover=True)
+    for _, elem in context:
         if elem.tag == "Record":
             records.append(format_record(elem))
             elem.clear()
